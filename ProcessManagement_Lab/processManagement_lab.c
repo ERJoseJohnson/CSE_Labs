@@ -70,7 +70,73 @@ void setup(){
     //set global data min and max
     ShmPTR_global_data->max = -1;
     ShmPTR_global_data->min = INT_MAX;
-    
+
+    /*
+    Part C
+    */
+
+    //Semaphore for global_data struct
+    sem_global_data = sem_open("semglobaldata",O_CREAT|O_EXCL,0644,1);
+
+    //Check if sempahore is correctly opened
+    while(true){
+        if(sem_global_data == SEM_FAILED){
+            sem_unlink("semglobaldata");
+            sem_global_data = sem_open("semglobaldata",O_CREAT|O_EXCL,0644,1);
+        }
+        else{
+            break;
+        }
+    }
+
+    /*
+    Part D
+    */
+
+   //Create shared memory for number_of_processes job struct
+   ShmID_jobs = shmget(IPC_PRIVATE, sizeof(job)*number_of_processes, IPC_CREAT | 0666);
+   if(ShmID_jobs == -1){
+       printf("Job data shared memory creation failed\n");
+       exit(EXIT_FAILURE);
+   }
+   shmPTR_jobs_buffer = (job *) shmat(ShmID_jobs,NULL,0);
+   if((int) shmPTR_jobs_buffer == -1){
+       printf("Attachment to job data shared memeory failed\n");
+       exit(EXIT_FAILURE);
+   }
+
+   /*
+   Part E
+   */
+
+    //Loop to setup contents of job buffer
+    for(int i=0;i<number_of_processes;i++){
+        shmPTR_jobs_buffer[i].task_status=0;
+        shmPTR_jobs_buffer[i].task_duration=0;
+    }
+
+    /*
+    Part F
+    */
+
+    //Semaphore for number_of_processes
+    //char semaphoreName[8] = "semjobsi";
+    //char tempNumString;
+    for(int i=0;i<number_of_processes;i++){
+        //itoa(i,tempNumString,10);
+        //semaphoreName[7] = tempNumString;
+        sem_jobs_buffer[i] = sem_open("semjobsi",O_CREAT|O_EXCL,0644,1);
+        while(true){
+            if(sem_jobs_buffer[i] == SEM_FAILED){
+                sem_unlink("semjobsi");
+                sem_jobs_buffer[i] = sem_open("semjobsi",O_CREAT|O_EXCL,0644,1);
+            }
+            else{
+                break;
+            }
+        }
+    }
+
     return;
 
 }
@@ -137,23 +203,14 @@ void cleanup(){
     // 3. Unlink all semaphores in sem_jobs_buffer
 }
 
-// Real main
+// Test main for TODO#1
 int main(int argc, char* argv[]){
-
-    printf("Lab 1 Starts...\n");
-
-    struct timeval start, end;
-    long secs_used,micros_used;
-
-    //start timer
-    gettimeofday(&start, NULL);
 
     //Check and parse command line options to be in the right format
     if (argc < 2) {
         printf("Usage: sum <infile> <numprocs>\n");
         exit(EXIT_FAILURE);
     }
-
 
     //Limit number_of_processes into 10. 
     //If there's no third argument, set the default number_of_processes into 1.  
@@ -165,21 +222,71 @@ int main(int argc, char* argv[]){
         else number_of_processes = MAX_PROCESS;
     }
 
+    printf("Number of processes: %d\n", number_of_processes);
+
     setup();
-    createchildren();
-    main_loop(argv[1]);
 
-    //parent cleanup
-    cleanup();
+    //test fill the shared memory with something 
+    for (int i = 0; i<number_of_processes; i++){
+        printf("Parent write job %d with duration %d, status %d \n", i, i*2, 0);
+        shmPTR_jobs_buffer[i].task_duration = i*2;
+        shmPTR_jobs_buffer[i].task_status = 0; //from parent
+    }
 
-    //stop timer
-    gettimeofday(&end, NULL);
+    pid_t pid_test = fork();
 
-    double start_usec = (double) start.tv_sec * 1000000 + (double) start.tv_usec;
-    double end_usec =  (double) end.tv_sec * 1000000 + (double) end.tv_usec;
+    if (pid_test == 0){
+        //child print
+        for (int i = 0; i<number_of_processes; i++){
+            printf("Child receives job duration from parent: %d, status %d \n", shmPTR_jobs_buffer[i].task_duration, shmPTR_jobs_buffer[i].task_status);
+            //rewrite for parent
+            shmPTR_jobs_buffer[i].task_duration = -1;
+            shmPTR_jobs_buffer[i].task_status = -1; //from child
+            sem_post(sem_jobs_buffer[i]);
+        }
+        exit(0);
+    }
+    else{
+        for (int i = 0; i<number_of_processes; i++){
+            sem_wait(sem_jobs_buffer[i]);
+            printf("Job %i  cleared by children. Duration: %d, status %d \n", i, shmPTR_jobs_buffer[i].task_duration, shmPTR_jobs_buffer[i].task_status);
 
-    printf("Your computation has used: %lf secs \n", (end_usec - start_usec)/(double)1000000);
+        }
+        wait(NULL);
+    }
+
+    //detach and remove shared memory locations
+    int detach_status = shmdt((void *) ShmPTR_global_data); //detach
+    if (detach_status == -1) printf("Detach shared memory global_data ERROR\n");
+    int remove_status = shmctl(ShmID_global_data, IPC_RMID, NULL); //delete
+    if (remove_status == -1) printf("Remove shared memory global_data ERROR\n");
+    detach_status = shmdt((void *) shmPTR_jobs_buffer); //detach
+    if (detach_status == -1) printf("Detach shared memory jobs ERROR\n");
+    remove_status = shmctl(ShmID_jobs, IPC_RMID, NULL); //delete
+    if (remove_status == -1) printf("Remove shared memory jobs ERROR\n");
 
 
-    return (EXIT_SUCCESS);
+    //unlink all semaphores before exiting process
+    int sem_close_status = sem_unlink("semglobaldata");
+    if (sem_close_status == 0){
+        printf("Semaphore globaldata closes succesfully.\n");
+    }
+    else{
+        printf("Semaphore globaldata fails to close.\n");
+    }
+
+    for (int i = 0; i<number_of_processes; i++){
+        char *sem_name = malloc(sizeof(char)*16);
+        sprintf(sem_name, "semjobs%d", i);
+        sem_close_status = sem_unlink(sem_name);
+        if (sem_close_status == 0){
+             printf("Semaphore jobs %d closes succesfully.\n", i);
+        }
+        else{
+            printf("Semaphore jobs %d fails to close.\n", i);
+        }
+        free(sem_name);
+    }
+    printf("success\n");
+    return 0;
 }
