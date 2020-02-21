@@ -123,9 +123,9 @@ void setup(){
     //char semaphoreName[8] = "semjobsi";
     //char tempNumString;
     for(int i=0;i<number_of_processes;i++){
-        //itoa(i,tempNumString,10);
-        //semaphoreName[7] = tempNumString;
-        sem_jobs_buffer[i] = sem_open("semjobsi",O_CREAT|O_EXCL,0644,1);
+        char *sem_name = malloc(sizeof(char)*16);
+        sprintf(sem_name, "semjobs%d", i);
+        sem_jobs_buffer[i] = sem_open(sem_name,O_CREAT|O_EXCL,0644,1);
         while(true){
             if(sem_jobs_buffer[i] == SEM_FAILED){
                 sem_unlink("semjobsi");
