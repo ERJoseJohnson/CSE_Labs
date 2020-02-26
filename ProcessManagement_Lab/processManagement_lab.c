@@ -252,20 +252,27 @@ void main_loop(char* fileName){
         }
     }
     fclose(opened_file);
-    sleep(1);
+    //sleep(1);
 
     printf("Main process is going to send termination signals\n");
 
     // TODO#4: Design a way to send termination jobs to ALL worker that are currently alive 
-    for(int i =0; i<number_of_processes; i++){
-        if(waitpid(children_processes[i],NULL,WNOHANG)==0){
-            printf("killing one\n");
-            shmPTR_jobs_buffer[i].task_type = 'z';
-            shmPTR_jobs_buffer[i].task_duration = 1;
-            shmPTR_jobs_buffer[i].task_status = 1; //new, undone job
-            sem_post(sem_jobs_buffer[i]); // signal the child
+    int deadProcesses = 0;
+    while(true){
+        for(int i =0; i<number_of_processes; i++){
+            int alive = waitpid(children_processes[i],NULL,WNOHANG);
+            if(alive==0 && shmPTR_jobs_buffer[i].task_status==0){
+                printf("killing one\n");
+                shmPTR_jobs_buffer[i].task_type = 'z';
+                shmPTR_jobs_buffer[i].task_duration = 1;
+                shmPTR_jobs_buffer[i].task_status = 1; //new, undone job
+                sem_post(sem_jobs_buffer[i]); // signal the child
+                deadProcesses++;
+                printf("%d\n",deadProcesses);
             }
         }
+        if(deadProcesses==number_of_processes){break;}
+    }
 
     printf("Termination sigansl done \n");
     //wait for all children processes to properly execute the 'z' termination jobs
