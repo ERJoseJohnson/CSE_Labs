@@ -1,7 +1,0 @@
-    //wait for all children processes to properly execute the 'z' termination jobs
-    int process_waited_final = 0;
-    pid_t wpid;
-    printf("Please work\n");
-    while ((wpid = wait(NULL)) > 0){
-        process_waited_final ++;
-    }
